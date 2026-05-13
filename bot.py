@@ -281,20 +281,11 @@ async def post_init(application):
 
 
 if __name__ == "__main__":
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_TOKEN)
-        .post_init(post_init)
-        .connect_timeout(60.0)
-        .read_timeout(120.0)
-        .write_timeout(60.0)
-        .pool_timeout(60.0)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("refresh", cmd_refresh))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info("✅ Бот запущен!")
-    app.run_polling(drop_pending_updates=True, timeout=60)
+    try:
+        logger.info("✅ Бот запущен!")
+        app.run_polling(drop_pending_updates=True, timeout=60)
+    except Exception as e:
+        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
+        raise
