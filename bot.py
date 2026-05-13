@@ -22,7 +22,8 @@ from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS
 
 # ──────────────────────────────────────────────
 TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
-CACHE_PATH = "/usr/sbin/bot/schedule_cache.json"
+import os
+CACHE_PATH = os.path.join(os.getcwd(), "schedule_cache.json")
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
 # ──────────────────────────────────────────────
