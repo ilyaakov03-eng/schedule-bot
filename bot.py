@@ -316,4 +316,18 @@ if __name__ == "__main__":
     logger.info("✅ Бот запущен!")
 
 if __name__ == "__main__":
+    import asyncio
+    import signal
+    
+    # Создаем event loop до запуска приложения
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Обработка сигналов для graceful shutdown
+    def signal_handler(sig, frame):
+        loop.stop()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     app.run_polling(drop_pending_updates=True, timeout=60)
