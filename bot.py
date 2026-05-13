@@ -315,10 +315,12 @@ if __name__ == "__main__":
 
     logger.info("✅ Бот запущен!")
 
-# Фикс для Python 3.14
-try:
-    asyncio.get_event_loop()
-except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
+import asyncio
 
-app.run_polling(drop_pending_updates=True, timeout=60)
+async def main():
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True, timeout=60)
+
+if __name__ == "__main__":
+    asyncio.run(main())
