@@ -12,6 +12,7 @@ import asyncio
 import logging
 import random
 import re
+import os
 from datetime import datetime, timedelta, date
 
 import pytz
@@ -22,8 +23,7 @@ from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS
 
 # ──────────────────────────────────────────────
 TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
-import os
-CACHE_PATH = os.path.join(os.getcwd(), "schedule_cache.json")
+CACHE_PATH = "schedule_cache.json"
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
 # ──────────────────────────────────────────────
@@ -79,7 +79,7 @@ SUBJECT_ALIASES = {
     "нал": "Налоговое право",
 }
 
-# Глобальный кэш расписания (обновляется при старте и каждые N часов)
+# Глобальный кэш расписания
 _schedule_cache: dict = {}
 
 
@@ -92,7 +92,7 @@ async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
     global _schedule_cache
     logger.info("Фоновое обновление расписания...")
     try:
-        data = await scrape_schedule(weeks_ahead=3, debug_dir="/usr/sbin/bot")
+        data = await scrape_schedule(weeks_ahead=3)
         if data:
             _schedule_cache = data
             import json
@@ -128,7 +128,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if any(w in text for w in ["обновить расписание", "обнови расписание", "refresh", "/refresh"]):
         await update.message.reply_text("🔄 Обновляю расписание с сайта, подожди немного...")
         global _schedule_cache
-        data = await scrape_schedule(weeks_ahead=3, debug_dir="/usr/sbin/bot")
+        data = await scrape_schedule(weeks_ahead=3)
         if data:
             _schedule_cache = data
             import json
@@ -137,10 +137,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 json.dump({"schedule": data, "updated_at": dt.now().isoformat()}, f, ensure_ascii=False)
             await update.message.reply_text(f"✅ Готово! Загружено {len(data)} дней расписания.")
         else:
-            await update.message.reply_text(
-                "❌ Не удалось получить расписание с сайта.\n"
-                "Скриншоты для диагностики сохранены в /usr/sbin/bot/debug_*.png"
-            )
+            await update.message.reply_text("❌ Не удалось получить расписание с сайта.")
         return
 
     # ──── «Когда следующая [предмет]» ────
@@ -193,7 +190,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif "послезавтра" in text:
             target_date = (now + timedelta(days=2)).date()
         elif "неделю" in text:
-            # Показываем всю текущую неделю
             monday = now.date() - timedelta(days=now.weekday())
             await _send_week(update, sched, monday, "Текущая неделя")
             return
@@ -212,12 +208,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if target_date:
             await _send_day(update, sched, target_date)
         else:
-            # Если не поняли дату, показываем сегодня
             await _send_day(update, sched, now.date())
         return
-
-    # ──── Неизвестная команда ────
-    # Не реагируем на сообщения, не относящиеся к расписанию
 
 
 async def _send_day(update: Update, sched: dict, target_date: date):
@@ -237,7 +229,7 @@ async def _send_day(update: Update, sched: dict, target_date: date):
 async def _send_week(update: Update, sched: dict, monday: date, title: str):
     lines = [f"📆 <b>{title}:</b>\n"]
     has_any = False
-    for i in range(6):  # Пн–Сб
+    for i in range(6):
         d = monday + timedelta(days=i)
         lessons = sched.get(d.strftime("%Y-%m-%d"), [])
         day_name = WEEKDAYS_RUS[d.weekday()]
@@ -270,11 +262,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_message(update, context)  # перенаправляем в общий обработчик
+    await handle_message(update, context)
 
 
 async def post_init(application):
-    """Запускается после старта бота — загружаем кэш и ставим задачу обновления."""
+    """Запускается при старте бота."""
     global _schedule_cache
 
     logger.info("Загружаю расписание при старте...")
@@ -284,15 +276,15 @@ async def post_init(application):
         logger.info(f"Расписание загружено: {len(data)} дней")
     else:
         logger.warning("Расписание пустое — запускаю принудительный скрапинг")
-        data = await scrape_schedule(weeks_ahead=3, debug_dir="/usr/sbin/bot")
+        data = await scrape_schedule(weeks_ahead=3)
         _schedule_cache = data or {}
 
-    # Авто-обновление каждые N часов
+    # Авто-обновление
     job_queue = application.job_queue
     job_queue.run_repeating(
         refresh_schedule_task,
         interval=CACHE_REFRESH_HOURS * 3600,
-        first=CACHE_REFRESH_HOURS * 3600,  # первый запуск через N часов (не сразу)
+        first=CACHE_REFRESH_HOURS * 3600,
         name="auto_refresh",
     )
     logger.info(f"Авто-обновление каждые {CACHE_REFRESH_HOURS} часов настроено.")
@@ -315,20 +307,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ Бот запущен!")
-
-if __name__ == "__main__":
-    import asyncio
-    import signal
-    
-    # Создаем event loop до запуска приложения
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # Обработка сигналов для graceful shutdown
-    def signal_handler(sig, frame):
-        loop.stop()
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     app.run_polling(drop_pending_updates=True, timeout=60)
