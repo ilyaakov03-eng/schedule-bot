@@ -15,6 +15,11 @@ VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 API_BASE = "https://av.dvuimvd.ru/api"
 TARGET_GROUP = "Ю 16 ПОНБ 2022"
 
+# ============ HARDCODED TOKEN И GROUP_ID ============
+API_TOKEN = "c68d8b66-34eb-4525-b71b-0d1b62d777f0"
+HARDCODED_GROUP_ID = "553"
+# ====================================================
+
 MONTHS_MAP = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
     "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
@@ -66,60 +71,9 @@ def get_headers():
     }
 
 
-async def get_group_id(client: httpx.AsyncClient) -> str | None:
-    """
-    Получает список групп и ищет group_id для нужной группы.
-    """
-    try:
-        logger.info(f"[API] Ищу group_id для '{TARGET_GROUP}'...")
-        
-        resp = await client.get(
-            f"{API_BASE}/call/schedule-schedule/structure",
-            headers=get_headers(),
-            follow_redirects=True
-        )
-        
-        if resp.status_code == 403:
-            logger.warning("[API] 403 Forbidden, пробую без токена...")
-        
-        resp.raise_for_status()
-        data = resp.json()
-        
-        logger.info(f"[API] Получена структура, ищу группу...")
-        
-        def find_group(obj, target_name):
-            if isinstance(obj, dict):
-                if obj.get("name") == target_name and obj.get("id"):
-                    return obj.get("id")
-                for key in ["children", "items", "groups", "courses"]:
-                    if key in obj:
-                        result = find_group(obj[key], target_name)
-                        if result:
-                            return result
-            elif isinstance(obj, list):
-                for item in obj:
-                    result = find_group(item, target_name)
-                    if result:
-                        return result
-            return None
-        
-        group_id = find_group(data, TARGET_GROUP)
-        
-        if group_id:
-            logger.info(f"[API] Найден group_id: {group_id}")
-            return str(group_id)
-        
-        logger.error(f"[API] Группа не найдена")
-        return None
-        
-    except Exception as e:
-        logger.error(f"[API] Ошибка при получении структуры: {e}")
-        return None
-
-
 async def scrape_schedule_api(group_id: str, months_count: int = 3) -> dict:
     """
-    Получает расписание через API.
+    Получает расписание через API с hardcoded token.
     """
     schedule = {}
     
@@ -137,10 +91,13 @@ async def scrape_schedule_api(group_id: str, months_count: int = 3) -> dict:
                 try:
                     url = f"{API_BASE}/call/schedule-schedule/student"
                     params = {
+                        "token": API_TOKEN,  # Используем hardcoded token
                         "group_id": group_id,
                         "month": month,
                         "year": year,
                     }
+                    
+                    logger.info(f"[API] Запрос: {url}?token={API_TOKEN}&group_id={group_id}&month={month}&year={year}")
                     
                     resp = await client.get(url, params=params, headers=get_headers())
                     resp.raise_for_status()
@@ -207,17 +164,12 @@ async def scrape_schedule_api(group_id: str, months_count: int = 3) -> dict:
 
 async def scrape_schedule(weeks_ahead: int = 3, debug_dir: str = "/usr/sbin/bot") -> dict:
     """
-    Главная функция.
+    Главная функция — использует hardcoded group_id.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            group_id = await get_group_id(client)
-            if not group_id:
-                logger.error("[Scraper] Не удалось получить group_id")
-                return {}
-            
-            schedule = await scrape_schedule_api(group_id, months_count=3)
-            return schedule
+        logger.info(f"[Scraper] Используется hardcoded group_id: {HARDCODED_GROUP_ID}")
+        schedule = await scrape_schedule_api(HARDCODED_GROUP_ID, months_count=3)
+        return schedule
     
     except Exception as e:
         logger.error(f"[Scraper] Ошибка: {e}", exc_info=True)
