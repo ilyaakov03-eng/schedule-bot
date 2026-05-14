@@ -179,6 +179,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_date = (now + timedelta(days=1)).date()
         elif "послезавтра" in text:
             target_date = (now + timedelta(days=2)).date()
+        elif any(day in text for day in ["понедельник", "пн"]):
+            # Ищем следующий понедельник
+            days_ahead = 0 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["вторник", "вт"]):
+            days_ahead = 1 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["среда", "ср"]):
+            days_ahead = 2 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["четверг", "чт"]):
+            days_ahead = 3 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["пятница", "пт"]):
+            days_ahead = 4 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
         elif "неделю" in text:
             monday = now.date() - timedelta(days=now.weekday())
             await _send_week(update, sched, monday, "Текущая неделя")
