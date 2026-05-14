@@ -48,7 +48,6 @@ DISCIPLINE_SHORTCUTS = {
     "Основы оперативно-розыскной деятельности": "ОРД",
     "Расследование преступлений против личности и собственности": "Личность",
     "Расследование преступлений, связанных с незаконным оборотом наркотических средств и психотропных веществ": "Наркотики",
-    "Предупреждение преступлений и административных правонарушений органами внутренних дел": "Сырников",
     "Физическая подготовка": "ФП",
     "Тактико-специальная подготовка": "ТСП",
     "Огневая подготовка": "Огневая",
@@ -104,9 +103,13 @@ def format_lesson(les: dict, lesson_num: int) -> str:
     # Берём иконку для типа занятия
     icon = CLASS_TYPE_ICONS.get(short_class_type, "📝")
     
-    # Берём преподавателя и сокращаем
-    teacher = staff_names[0] if staff_names else ""
-    short_teacher = shorten_teacher(teacher) if teacher else ""
+    # Если ФП — используем силу мышц
+    if "фп" in short_discipline.lower():
+        icon = "💪"
+    
+    # Берём всех преподавателей и сокращаем
+    teachers = [shorten_teacher(t) for t in staff_names if t]
+    short_teacher = ", ".join(teachers) if teachers else ""
     
     # Формируем минималистичный вывод
     res = f"{lesson_num}. {icon} {short_discipline}"
