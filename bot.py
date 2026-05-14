@@ -17,7 +17,7 @@ from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS
 
 # ──────────────────────────────────────────────
 TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
-CACHE_PATH = "./schedule_cache.json"   # путь для Render
+CACHE_PATH = "schedule_cache.json"
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
 # ──────────────────────────────────────────────
@@ -279,25 +279,20 @@ async def post_init(application):
 
 
 if __name__ == "__main__":
-    import asyncio
-    
-    async def main():
-        app = (
-            ApplicationBuilder()
-            .token(TELEGRAM_TOKEN)
-            .post_init(post_init)
-            .connect_timeout(60.0)
-            .read_timeout(120.0)
-            .write_timeout(60.0)
-            .pool_timeout(60.0)
-            .build()
-        )
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .connect_timeout(60.0)
+        .read_timeout(120.0)
+        .write_timeout(60.0)
+        .pool_timeout(60.0)
+        .build()
+    )
 
-        app.add_handler(CommandHandler("start", cmd_start))
-        app.add_handler(CommandHandler("refresh", cmd_refresh))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("refresh", cmd_refresh))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        logger.info("✅ Бот запущен!")
-        await app.run_polling(drop_pending_updates=True, timeout=60)
-
-    asyncio.run(main())
+    logger.info("✅ Бот запущен!")
+    app.run_polling(drop_pending_updates=True, timeout=60)
