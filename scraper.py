@@ -47,6 +47,19 @@ def format_lesson(les: dict) -> str:
     if room: res += f"\n   🚪 {room}"
     return res
 
+def convert_date_format(date_str: str) -> str:
+    """Преобразует ДД.МММ.ГГГГ в ГГГГ-ММ-ДД"""
+    if not date_str or "." not in date_str:
+        return date_str
+    
+    parts = date_str.split(".")
+    if len(parts) == 3:
+        try:
+            return f"{parts[2]}-{parts[1]}-{parts[0]}"
+        except:
+            return date_str
+    return date_str
+
 async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
     schedule = {}
     
@@ -83,6 +96,9 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             date_str = lesson.get("date")
                             if not date_str:
                                 continue
+                            
+                            # Преобразуем формат даты из ДД.МММ.ГГГГ в ГГГГ-ММ-ДД
+                            date_str = convert_date_format(date_str)
                             
                             if date_str not in schedule:
                                 schedule[date_str] = []
