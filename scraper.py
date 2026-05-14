@@ -69,12 +69,28 @@ def shorten_teacher(name: str) -> str:
     """Сокращает ФИО преподавателя, оставляет только фамилию"""
     if not name:
         return ""
-    # Убираем ранги (п-к, ст. л-т, п/п-к, пол., и т.д.)
-    name = name.replace("п-к.", "").replace("ст. л-т", "").replace("п/п-к.", "").replace("пол.", "").strip()
+    
+    name = name.strip()
+    
+    # Список всех ранговых сокращений и должностей
+    ranks = [
+        "п/п-к.", "п-к.", "ст. л-т", "п/п-к", "п-к", "ст.", "л-т",
+        "пол.", "полковник", "майор", "капитан", "старший", "младший",
+        "лейтенант", "старше-лейтенант", "ст.л-т", "сержант"
+    ]
+    
+    # Убираем каждый ранг
+    for rank in ranks:
+        name = name.replace(rank, "").strip()
+    
+    # Удаляем лишние пробелы
+    name = " ".join(name.split())
+    
     # Берём только фамилию (первое слово)
     parts = name.split()
-    if parts:
-        return parts[0]  # Только фамилия
+    if parts and parts[0]:
+        return parts[0]
+    
     return name
 
 def get_lesson_time_minutes(lesson_time: str) -> int:
@@ -108,7 +124,7 @@ def format_lesson(les: dict, lesson_num: int) -> str:
         icon = "💪"
     
     # Берём всех преподавателей и сокращаем
-    teachers = [shorten_teacher(t) for t in staff_names if t]
+    teachers = [shorten_teacher(t) for t in staff_names if t and shorten_teacher(t)]
     short_teacher = ", ".join(teachers) if teachers else ""
     
     # Формируем минималистичный вывод
