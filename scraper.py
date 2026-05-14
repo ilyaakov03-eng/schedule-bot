@@ -1,5 +1,5 @@
 """
-scraper.py — финальная версия парсинга
+scraper.py — финальная версия парсинга с отладкой
 """
 
 import asyncio
@@ -33,7 +33,6 @@ def get_lesson_icon(name: str) -> str:
     return "📝"
 
 def format_lesson(les: dict) -> str:
-    # Пытаемся достать данные из разных возможных ключей API
     num = les.get("num") or les.get("number") or "?"
     name = les.get("name") or les.get("subject") or les.get("discipline") or "Предмет"
     kind = les.get("type") or les.get("kind") or ""
@@ -71,31 +70,47 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                 resp = await client.get(url, params=params, headers=headers)
                 data = resp.json()
 
-                # Извлекаем данные из 'data'
+                # === ОТЛАДКА ===
+                logger.info(f"[DEBUG] Структура ответа: {list(data.keys())}")
                 payload = data.get("data", {})
+                logger.info(f"[DEBUG] Тип payload: {type(payload).__name__}")
+                
+                if isinstance(payload, dict):
+                    logger.info(f"[DEBUG] payload это dict с ключами: {list(payload.keys())[:10]}")
+                    if payload:
+                        first_key = list(payload.keys())[0]
+                        logger.info(f"[DEBUG] Первый элемент {first_key}: {str(payload[first_key])[:500]}")
+                elif isinstance(payload, list):
+                    logger.info(f"[DEBUG] payload это list, длина: {len(payload)}")
+                    if payload:
+                        logger.info(f"[DEBUG] Первый элемент: {str(payload[0])[:500]}")
+                # ===============
                 
                 # Если payload — это словарь (ключи = даты)
                 if isinstance(payload, dict):
                     for d_str, lessons in payload.items():
                         if isinstance(lessons, list) and lessons:
-                            # d_str может быть "2026-05-13" или "13.05.2026"
                             day_lessons = [format_lesson(l) for l in lessons if isinstance(l, dict)]
                             if day_lessons:
                                 schedule[d_str] = day_lessons
+                                logger.info(f"[API] Добавлен день {d_str} с {len(day_lessons)} парами")
                 
                 # Если payload — это список уроков
                 elif isinstance(payload, list):
                     for l in payload:
                         if isinstance(l, dict) and "date" in l:
                             d_str = l["date"]
-                            if d_str not in schedule: schedule[d_str] = []
+                            if d_str not in schedule: 
+                                schedule[d_str] = []
                             schedule[d_str].append(format_lesson(l))
+                    logger.info(f"[API] Из списка загружено {len(schedule)} дней")
 
                 await asyncio.sleep(1)
 
     except Exception as e:
-        logger.error(f"[API] Ошибка: {e}")
+        logger.error(f"[API] Ошибка: {e}", exc_info=True)
     
+    logger.info(f"[API] ИТОГО загружено дней: {len(schedule)}")
     return schedule
 
 async def scrape_schedule(weeks_ahead: int = 3, debug_dir: str = ".") -> dict:
