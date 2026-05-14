@@ -1,5 +1,5 @@
 """
-scraper.py — финальная версия парсинга с отладкой
+scraper.py — финальная версия парсинга
 """
 
 import asyncio
@@ -70,40 +70,26 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                 resp = await client.get(url, params=params, headers=headers)
                 data = resp.json()
 
-                # === ОТЛАДКА ===
-                logger.info(f"[DEBUG] Структура ответа: {list(data.keys())}")
                 payload = data.get("data", {})
-                logger.info(f"[DEBUG] Тип payload: {type(payload).__name__}")
                 
-                if isinstance(payload, dict):
-                    logger.info(f"[DEBUG] payload это dict с ключами: {list(payload.keys())[:10]}")
-                    if payload:
-                        first_key = list(payload.keys())[0]
-                        logger.info(f"[DEBUG] Первый элемент {first_key}: {str(payload[first_key])[:500]}")
-                elif isinstance(payload, list):
-                    logger.info(f"[DEBUG] payload это list, длина: {len(payload)}")
-                    if payload:
-                        logger.info(f"[DEBUG] Первый элемент: {str(payload[0])[:500]}")
-                # ===============
+                # Берём lessons — это список всех пар
+                lessons_list = payload.get("lessons", [])
                 
-                # Если payload — это словарь (ключи = даты)
-                if isinstance(payload, dict):
-                    for d_str, lessons in payload.items():
-                        if isinstance(lessons, list) and lessons:
-                            day_lessons = [format_lesson(l) for l in lessons if isinstance(l, dict)]
-                            if day_lessons:
-                                schedule[d_str] = day_lessons
-                                logger.info(f"[API] Добавлен день {d_str} с {len(day_lessons)} парами")
-                
-                # Если payload — это список уроков
-                elif isinstance(payload, list):
-                    for l in payload:
-                        if isinstance(l, dict) and "date" in l:
-                            d_str = l["date"]
-                            if d_str not in schedule: 
-                                schedule[d_str] = []
-                            schedule[d_str].append(format_lesson(l))
-                    logger.info(f"[API] Из списка загружено {len(schedule)} дней")
+                if isinstance(lessons_list, list):
+                    logger.info(f"[API] Получено {len(lessons_list)} пар для {m}/{y}")
+                    
+                    for lesson in lessons_list:
+                        if isinstance(lesson, dict):
+                            date_str = lesson.get("date")
+                            if not date_str:
+                                continue
+                            
+                            if date_str not in schedule:
+                                schedule[date_str] = []
+                            
+                            formatted = format_lesson(lesson)
+                            schedule[date_str].append(formatted)
+                            logger.info(f"[API] Добавлена пара на {date_str}")
 
                 await asyncio.sleep(1)
 
