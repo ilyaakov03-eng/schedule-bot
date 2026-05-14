@@ -25,6 +25,14 @@ MONTHS_MAP = {
     "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
 }
 
+CLASS_TYPE_MAP = {
+    "лк": "Лекция",
+    "пр": "Практика",
+    "сем": "Семинар",
+    "лаб": "Лабораторная",
+    "кр": "Контрольная работа",
+}
+
 def get_lesson_icon(name: str) -> str:
     n = str(name).lower()
     if "физическ" in n or " фп" in n: return "💪"
@@ -33,27 +41,38 @@ def get_lesson_icon(name: str) -> str:
     return "📝"
 
 def format_lesson(les: dict) -> str:
-    # Пытаемся достать все данные из разных возможных ключей
-    num = les.get("num") or les.get("number") or les.get("lesson_num") or ""
-    name = les.get("name") or les.get("subject") or les.get("discipline") or "Предмет"
-    kind = les.get("type") or les.get("kind") or les.get("lesson_type") or ""
-    teacher = les.get("teacher") or les.get("fio") or les.get("lecturer") or ""
-    room = les.get("room") or les.get("auditorium") or les.get("audience") or ""
+    # Извлекаем данные из правильных ключей API
+    discipline = les.get("discipline", "Предмет")
+    class_type_name = les.get("class_type_name", "")
+    classroom = les.get("classroom", "")
+    lesson_time = les.get("lessonTime", "")
+    staff_names = les.get("staffNames", [])
     
-    icon = get_lesson_icon(name)
-    
-    # Формируем вывод
-    if num:
-        res = f"<b>{num} пара:</b> {icon} {name}"
+    # Преобразуем сокращение типа занятия
+    if class_type_name:
+        kind = CLASS_TYPE_MAP.get(class_type_name, class_type_name)
     else:
-        res = f"{icon} {name}"
+        kind = ""
+    
+    # Берём первого преподавателя (если есть)
+    teacher = staff_names[0] if staff_names else ""
+    
+    # Берём номер аудитории (если есть)
+    room = classroom
+    
+    icon = get_lesson_icon(discipline)
+    
+    # Формируем красивый вывод
+    res = f"{icon} <b>{discipline}</b>"
     
     if kind:
-        res += f" <i>({kind})</i>"
+        res += f"\n   <i>({kind})</i>"
+    if lesson_time:
+        res += f"\n   🕐 {lesson_time}"
     if teacher:
         res += f"\n   👨‍🏫 {teacher}"
     if room:
-        res += f"\n   🚪 Ауд. {room}"
+        res += f"\n   🚪 {room}"
     
     return res
 
@@ -72,7 +91,6 @@ def convert_date_format(date_str: str) -> str:
 
 async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
     schedule = {}
-    debug_logged = False
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -102,13 +120,8 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                 if isinstance(lessons_list, list):
                     logger.info(f"[API] Получено {len(lessons_list)} пар для {m}/{y}")
                     
-                    for idx, lesson in enumerate(lessons_list):
+                    for lesson in lessons_list:
                         if isinstance(lesson, dict):
-                            # Логируем первые 2 пары для отладки
-                            if not debug_logged and idx < 2:
-                                logger.info(f"[DEBUG] Пара #{idx}: {json.dumps(lesson, ensure_ascii=False, indent=2)[:2000]}")
-                                debug_logged = True
-                            
                             date_str = lesson.get("date")
                             if not date_str:
                                 continue
