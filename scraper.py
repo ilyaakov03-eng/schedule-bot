@@ -27,11 +27,21 @@ MONTHS_MAP = {
 }
 
 CLASS_TYPE_MAP = {
-    "лк": "Лекция",
-    "пр": "Практика",
-    "сем": "Семинар",
-    "лаб": "Лабораторная",
-    "кр": "Контрольная работа",
+    "лк": "лек",
+    "пр": "пр",
+    "сем": "сем",
+    "лаб": "лаб",
+    "кр": "кр",
+}
+
+# Сокращения для дисциплин
+DISCIPLINE_SHORTCUTS = {
+    "Основы оперативно-розыскной деятельности органов внутренних дел": "ОРД",
+    "Расследование преступлений против личности и собственности": "Личность",
+    "Физическая подготовка": "ФП",
+    "Тактико-специальная подготовка": "ТСП",
+    "Огневая подготовка": "Огневая",
+    "Криминалистика": "Крим",
 }
 
 def get_lesson_icon(name: str) -> str:
@@ -41,39 +51,67 @@ def get_lesson_icon(name: str) -> str:
     if "тсп" in n or "тактико" in n: return "🗺️"
     return "📝"
 
-def format_lesson(les: dict) -> str:
-    # Извлекаем данные из правильных ключей API
+def shorten_discipline(name: str) -> str:
+    """Сокращает название дисциплины"""
+    for full, short in DISCIPLINE_SHORTCUTS.items():
+        if full.lower() in name.lower():
+            return short
+    # Если нет сокращения и содержит "право" — оставляем оригинальное
+    if "право" in name.lower():
+        return name
+    # Иначе берём первые 30 символов
+    return name[:30] if len(name) > 30 else name
+
+def shorten_teacher(name: str) -> str:
+    """Сокращает ФИО преподавателя"""
+    # Убираем ранги (п-к, ст. л-т, п/п-к, пол., и т.д.)
+    name = name.replace("п-к.", "").replace("ст. л-т", "").replace("п/п-к.", "").replace("пол.", "").strip()
+    # Берём только фамилию и инициалы
+    parts = name.split()
+    if len(parts) >= 2:
+        return f"{parts[0]} {parts[1][0]}"  # Фамилия + первая буква имени
+    return name
+
+def shorten_room(room: str) -> str:
+    """Сокращает номер аудитории"""
+    # Извлекаем только номер (последнее число)
+    import re
+    numbers = re.findall(r'\d+', room)
+    if numbers:
+        return numbers[-1]  # Берём последний номер
+    return room
+
+def format_lesson(les: dict, lesson_num: int) -> str:
+    """Форматирует пару в минималистичный формат"""
     discipline = les.get("discipline", "Предмет")
     class_type_name = les.get("class_type_name", "")
     classroom = les.get("classroom", "")
-    lesson_time = les.get("lessonTime", "")
     staff_names = les.get("staffNames", [])
     
-    # Преобразуем сокращение типа занятия
-    if class_type_name:
-        kind = CLASS_TYPE_MAP.get(class_type_name, class_type_name)
-    else:
-        kind = ""
+    # Сокращаем дисциплину
+    short_discipline = shorten_discipline(discipline)
     
-    # Берём первого преподавателя (если есть)
+    # Сокращаем тип занятия
+    short_class_type = CLASS_TYPE_MAP.get(class_type_name, class_type_name) if class_type_name else ""
+    
+    # Берём преподавателя и сокращаем
     teacher = staff_names[0] if staff_names else ""
+    short_teacher = shorten_teacher(teacher) if teacher else ""
     
-    # Берём номер аудитории (если есть)
-    room = classroom
+    # Сокращаем аудиторию
+    short_room = shorten_room(classroom) if classroom else ""
     
     icon = get_lesson_icon(discipline)
     
-    # Формируем красивый вывод
-    res = f"{icon} <b>{discipline}</b>"
+    # Формируем минималистичный вывод
+    res = f"{lesson_num}. {icon} {short_discipline}"
     
-    if kind:
-        res += f"\n   <i>({kind})</i>"
-    if lesson_time:
-        res += f"\n   🕐 {lesson_time}"
-    if teacher:
-        res += f"\n   👨‍🏫 {teacher}"
-    if room:
-        res += f"\n   🚪 {room}"
+    if short_class_type:
+        res += f" ({short_class_type})"
+    if short_teacher:
+        res += f" 👨‍🏫 {short_teacher}"
+    if short_room:
+        res += f" 🚪 {short_room}"
     
     return res
 
@@ -150,7 +188,10 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             if date_str_converted not in schedule:
                                 schedule[date_str_converted] = []
                             
-                            formatted = format_lesson(lesson)
+                            # Номер пары в этот день
+                            lesson_num = len(schedule[date_str_converted]) + 1
+                            
+                            formatted = format_lesson(lesson, lesson_num)
                             schedule[date_str_converted].append(formatted)
                             logger.info(f"[API] Добавлена пара на {date_str_converted}")
 
