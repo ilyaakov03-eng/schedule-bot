@@ -1,5 +1,5 @@
 """
-scraper.py — финальная версия парcинга
+scraper.py — финальная версия парсинга
 """
 
 import asyncio
@@ -33,18 +33,28 @@ def get_lesson_icon(name: str) -> str:
     return "📝"
 
 def format_lesson(les: dict) -> str:
-    num = les.get("num") or les.get("number") or "?"
+    # Пытаемся достать все данные из разных возможных ключей
+    num = les.get("num") or les.get("number") or les.get("lesson_num") or ""
     name = les.get("name") or les.get("subject") or les.get("discipline") or "Предмет"
-    kind = les.get("type") or les.get("kind") or ""
-    teacher = les.get("teacher") or les.get("fio") or ""
-    room = les.get("room") or les.get("auditorium") or ""
+    kind = les.get("type") or les.get("kind") or les.get("lesson_type") or ""
+    teacher = les.get("teacher") or les.get("fio") or les.get("lecturer") or ""
+    room = les.get("room") or les.get("auditorium") or les.get("audience") or ""
     
     icon = get_lesson_icon(name)
     
-    res = f"<b>{num} пара:</b> {icon} {name}"
-    if kind: res += f" <i>({kind})</i>"
-    if teacher: res += f"\n   👨‍🏫 {teacher}"
-    if room: res += f"\n   🚪 {room}"
+    # Формируем вывод
+    if num:
+        res = f"<b>{num} пара:</b> {icon} {name}"
+    else:
+        res = f"{icon} {name}"
+    
+    if kind:
+        res += f" <i>({kind})</i>"
+    if teacher:
+        res += f"\n   👨‍🏫 {teacher}"
+    if room:
+        res += f"\n   🚪 Ауд. {room}"
+    
     return res
 
 def convert_date_format(date_str: str) -> str:
@@ -62,6 +72,7 @@ def convert_date_format(date_str: str) -> str:
 
 async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
     schedule = {}
+    debug_logged = False
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -91,8 +102,13 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                 if isinstance(lessons_list, list):
                     logger.info(f"[API] Получено {len(lessons_list)} пар для {m}/{y}")
                     
-                    for lesson in lessons_list:
+                    for idx, lesson in enumerate(lessons_list):
                         if isinstance(lesson, dict):
+                            # Логируем первые 2 пары для отладки
+                            if not debug_logged and idx < 2:
+                                logger.info(f"[DEBUG] Пара #{idx}: {json.dumps(lesson, ensure_ascii=False, indent=2)[:2000]}")
+                                debug_logged = True
+                            
                             date_str = lesson.get("date")
                             if not date_str:
                                 continue
@@ -105,7 +121,6 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             
                             formatted = format_lesson(lesson)
                             schedule[date_str].append(formatted)
-                            logger.info(f"[API] Добавлена пара на {date_str}")
 
                 await asyncio.sleep(1)
 
