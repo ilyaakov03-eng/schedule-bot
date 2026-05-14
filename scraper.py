@@ -17,6 +17,7 @@ API_BASE = "https://av.dvuimvd.ru/api"
 # ============ HARDCODED TOKEN И GROUP_ID ============
 API_TOKEN = "c68d8b66-34eb-4525-b71b-0d1b62d777f0"
 HARDCODED_GROUP_ID = "553"
+TARGET_GROUP_NAME = "Ю 16 ПОНБ 2022"
 # ====================================================
 
 WEEKDAYS_RUS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
@@ -89,9 +90,21 @@ def convert_date_format(date_str: str) -> str:
             return date_str
     return date_str
 
+def is_lesson_for_our_group(lesson: dict) -> bool:
+    """Проверяет, относится ли пара к нашей группе"""
+    # Если group_id совпадает — это точно наша пара
+    if lesson.get("group_id") == int(HARDCODED_GROUP_ID):
+        return True
+    
+    # Если это поток (flow), проверяем по названию группы
+    group_name = lesson.get("groupName", "")
+    if TARGET_GROUP_NAME in group_name:
+        return True
+    
+    return False
+
 async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
     schedule = {}
-    debug_logged_dates = set()
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -123,14 +136,13 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                     
                     for lesson in lessons_list:
                         if isinstance(lesson, dict):
+                            # Фильтруем по группе
+                            if not is_lesson_for_our_group(lesson):
+                                continue
+                            
                             date_str = lesson.get("date")
                             if not date_str:
                                 continue
-                            
-                            # Логируем по одной паре с каждой даты
-                            if date_str not in debug_logged_dates:
-                                logger.info(f"[DEBUG {date_str}] Пара: {json.dumps(lesson, ensure_ascii=False, indent=2)[:1500]}")
-                                debug_logged_dates.add(date_str)
                             
                             # Преобразуем формат даты из ДД.МММ.ГГГГ в ГГГГ-ММ-ДД
                             date_str_converted = convert_date_format(date_str)
@@ -140,6 +152,7 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             
                             formatted = format_lesson(lesson)
                             schedule[date_str_converted].append(formatted)
+                            logger.info(f"[API] Добавлена пара на {date_str_converted}")
 
                 await asyncio.sleep(1)
 
