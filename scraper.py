@@ -45,7 +45,10 @@ CLASS_TYPE_ICONS = {
 # Сокращения для дисциплин
 DISCIPLINE_SHORTCUTS = {
     "Основы оперативно-розыскной деятельности органов внутренних дел": "ОРД",
+    "Основы оперативно-розыскной деятельности": "ОРД",
     "Расследование преступлений против личности и собственности": "Личность",
+    "Расследование преступлений, связанных с незаконным оборотом наркотических средств и психотропных веществ": "Наркотики",
+    "Предупреждение преступлений и административных правонарушений органами внутренних дел": "Сырников",
     "Физическая подготовка": "ФП",
     "Тактико-специальная подготовка": "ТСП",
     "Огневая подготовка": "Огневая",
@@ -65,13 +68,26 @@ def shorten_discipline(name: str) -> str:
 
 def shorten_teacher(name: str) -> str:
     """Сокращает ФИО преподавателя, оставляет только фамилию"""
+    if not name:
+        return ""
     # Убираем ранги (п-к, ст. л-т, п/п-к, пол., и т.д.)
     name = name.replace("п-к.", "").replace("ст. л-т", "").replace("п/п-к.", "").replace("пол.", "").strip()
-    # Берём только фамилию
+    # Берём только фамилию (первое слово)
     parts = name.split()
     if parts:
         return parts[0]  # Только фамилия
     return name
+
+def get_lesson_time_minutes(lesson_time: str) -> int:
+    """Преобразует время '09:00 - 10:30' в минуты с начала дня для сортировки"""
+    if not lesson_time:
+        return 0
+    try:
+        start_time = lesson_time.split(" - ")[0]
+        hours, minutes = map(int, start_time.split(":"))
+        return hours * 60 + minutes
+    except:
+        return 0
 
 def format_lesson(les: dict, lesson_num: int) -> str:
     """Форматирует пару в минималистичный формат"""
@@ -92,7 +108,7 @@ def format_lesson(les: dict, lesson_num: int) -> str:
     teacher = staff_names[0] if staff_names else ""
     short_teacher = shorten_teacher(teacher) if teacher else ""
     
-    # Формируем минималистичный вывод (без аудитории, без инициалов)
+    # Формируем минималистичный вывод
     res = f"{lesson_num}. {icon} {short_discipline}"
     
     if short_class_type:
@@ -175,20 +191,25 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             if date_str_converted not in schedule:
                                 schedule[date_str_converted] = []
                             
-                            # Номер пары в этот день
-                            lesson_num = len(schedule[date_str_converted]) + 1
-                            
-                            formatted = format_lesson(lesson, lesson_num)
-                            schedule[date_str_converted].append(formatted)
-                            logger.info(f"[API] Добавлена пара на {date_str_converted}")
+                            # Добавляем пару со временем для сортировки
+                            schedule[date_str_converted].append(lesson)
 
                 await asyncio.sleep(1)
 
     except Exception as e:
         logger.error(f"[API] Ошибка: {e}", exc_info=True)
     
-    logger.info(f"[API] ИТОГО загружено дней: {len(schedule)}")
-    return schedule
+    # Сортируем пары по времени и форматируем
+    sorted_schedule = {}
+    for date_key, lessons in schedule.items():
+        # Сортируем по времени начала
+        sorted_lessons = sorted(lessons, key=lambda x: get_lesson_time_minutes(x.get("lessonTime", "")))
+        # Форматируем
+        formatted_lessons = [format_lesson(les, idx + 1) for idx, les in enumerate(sorted_lessons)]
+        sorted_schedule[date_key] = formatted_lessons
+    
+    logger.info(f"[API] ИТОГО загружено дней: {len(sorted_schedule)}")
+    return sorted_schedule
 
 async def scrape_schedule(weeks_ahead: int = 3, debug_dir: str = ".") -> dict:
     return await scrape_schedule_api(HARDCODED_GROUP_ID)
