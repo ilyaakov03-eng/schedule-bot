@@ -1,8 +1,12 @@
+"""
+bot.py — Телеграм-бот расписания ДВЮИ МВД России
+Группа: Ю 16 ПОНБ 2022 (4 курс, юриспруденция)
+"""
+
 import asyncio
 import logging
 import random
 import re
-import os
 from datetime import datetime, timedelta, date
 
 import pytz
@@ -13,7 +17,7 @@ from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS
 
 # ──────────────────────────────────────────────
 TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
-CACHE_PATH = "schedule_cache.json"
+CACHE_PATH = "./schedule_cache.json"   # путь для Render
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
 # ──────────────────────────────────────────────
@@ -69,7 +73,6 @@ SUBJECT_ALIASES = {
     "нал": "Налоговое право",
 }
 
-# Глобальный кэш расписания
 _schedule_cache: dict = {}
 
 
@@ -78,11 +81,10 @@ def get_schedule() -> dict:
 
 
 async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
-    """Фоновая задача: обновляет расписание каждые N часов."""
     global _schedule_cache
     logger.info("Фоновое обновление расписания...")
     try:
-        data = await scrape_schedule(weeks_ahead=3)
+        data = await scrape_schedule()
         if data:
             _schedule_cache = data
             import json
@@ -91,7 +93,7 @@ async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
                 json.dump({"schedule": data, "updated_at": dt.now().isoformat()}, f, ensure_ascii=False)
             logger.info(f"Расписание обновлено: {len(data)} дней")
         else:
-            logger.warning("Обновление не дало результата, оставляю старый кэш")
+            logger.warning("Обновление не дало результата")
     except Exception as e:
         logger.error(f"Ошибка фонового обновления: {e}", exc_info=True)
 
@@ -105,7 +107,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
     now = datetime.now(VLAD_TZ)
 
-    # ──── Забаненный пользователь ────
     asks_schedule = any(w in text for w in ["пары", "расписание", "когда", "следующая", "следующий"])
     if username == BANNED_USER:
         if asks_schedule:
@@ -114,11 +115,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sched = get_schedule()
 
-    # ──── Принудительное обновление ────
+    # Принудительное обновление
     if any(w in text for w in ["обновить расписание", "обнови расписание", "refresh", "/refresh"]):
         await update.message.reply_text("🔄 Обновляю расписание с сайта, подожди немного...")
         global _schedule_cache
-        data = await scrape_schedule(weeks_ahead=3)
+        data = await scrape_schedule()
         if data:
             _schedule_cache = data
             import json
@@ -130,7 +131,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не удалось получить расписание с сайта.")
         return
 
-    # ──── «Когда следующая [предмет]» ────
+    # Когда следующая [предмет]
     if "когда" in text or "следующая" in text or "следующий" in text:
         target = None
         for alias, full in SUBJECT_ALIASES.items():
@@ -155,7 +156,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ «{full}» не нашёл в расписании на ближайшие 6 недель.")
             return
 
-        # "когда" без предмета — показываем ближайший учебный день
         if not any(w in text for w in ["пары", "расписание"]):
             for i in range(0, 14):
                 d = (now + timedelta(days=i)).date()
@@ -169,7 +169,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📭 В ближайшие 2 недели пар не нашёл.")
             return
 
-    # ──── «Пары сегодня / завтра / дата» ────
+    # Пары сегодня / завтра / дата
     if any(w in text for w in ["пары", "расписание"]):
         target_date = None
 
@@ -211,7 +211,7 @@ async def _send_day(update: Update, sched: dict, target_date: date):
     msg += "\n".join(lessons) if lessons else "Пар нет — отдыхаем! ✨"
 
     if not sched:
-        msg += "\n\n⚠️ <i>Расписание не загружено. Попробуй написать «обновить расписание»</i>"
+        msg += "\n\n⚠️ <i>Расписание не загружено. Напиши «обновить расписание»</i>"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -256,7 +256,6 @@ async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    """Запускается при старте бота."""
     global _schedule_cache
 
     logger.info("Загружаю расписание при старте...")
@@ -265,11 +264,10 @@ async def post_init(application):
         _schedule_cache = data
         logger.info(f"Расписание загружено: {len(data)} дней")
     else:
-        logger.warning("Расписание пустое — запускаю принудительный скрапинг")
-        data = await scrape_schedule(weeks_ahead=3)
+        logger.warning("Расписание пустое — запускаю скрапинг")
+        data = await scrape_schedule()
         _schedule_cache = data or {}
 
-    # Авто-обновление
     job_queue = application.job_queue
     job_queue.run_repeating(
         refresh_schedule_task,
@@ -296,19 +294,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    try:
-        # ============ FIX ДЛЯ PYTHON 3.14 ============
-        import asyncio
-        try:
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-        # =============================================
-        
-        logger.info("✅ Бот запущен!")
-        app.run_polling(drop_pending_updates=True, timeout=60)
-    except Exception as e:
-        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-        import traceback
-        traceback.print_exc()
-        raise
+    logger.info("✅ Бот запущен!")
+    app.run_polling(drop_pending_updates=True, timeout=60)
