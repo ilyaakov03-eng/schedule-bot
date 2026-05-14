@@ -34,6 +34,14 @@ CLASS_TYPE_MAP = {
     "кр": "кр",
 }
 
+CLASS_TYPE_ICONS = {
+    "лек": "📖",
+    "пр": "📝",
+    "сем": "📚",
+    "лаб": "🔬",
+    "кр": "✍️",
+}
+
 # Сокращения для дисциплин
 DISCIPLINE_SHORTCUTS = {
     "Основы оперативно-розыскной деятельности органов внутренних дел": "ОРД",
@@ -43,13 +51,6 @@ DISCIPLINE_SHORTCUTS = {
     "Огневая подготовка": "Огневая",
     "Криминалистика": "Крим",
 }
-
-def get_lesson_icon(name: str) -> str:
-    n = str(name).lower()
-    if "физическ" in n or " фп" in n: return "💪"
-    if "огнев" in n: return "🔫"
-    if "тсп" in n or "тактико" in n: return "🗺️"
-    return "📝"
 
 def shorten_discipline(name: str) -> str:
     """Сокращает название дисциплины"""
@@ -63,29 +64,19 @@ def shorten_discipline(name: str) -> str:
     return name[:30] if len(name) > 30 else name
 
 def shorten_teacher(name: str) -> str:
-    """Сокращает ФИО преподавателя"""
+    """Сокращает ФИО преподавателя, оставляет только фамилию"""
     # Убираем ранги (п-к, ст. л-т, п/п-к, пол., и т.д.)
     name = name.replace("п-к.", "").replace("ст. л-т", "").replace("п/п-к.", "").replace("пол.", "").strip()
-    # Берём только фамилию и инициалы
+    # Берём только фамилию
     parts = name.split()
-    if len(parts) >= 2:
-        return f"{parts[0]} {parts[1][0]}"  # Фамилия + первая буква имени
+    if parts:
+        return parts[0]  # Только фамилия
     return name
-
-def shorten_room(room: str) -> str:
-    """Сокращает номер аудитории"""
-    # Извлекаем только номер (последнее число)
-    import re
-    numbers = re.findall(r'\d+', room)
-    if numbers:
-        return numbers[-1]  # Берём последний номер
-    return room
 
 def format_lesson(les: dict, lesson_num: int) -> str:
     """Форматирует пару в минималистичный формат"""
     discipline = les.get("discipline", "Предмет")
     class_type_name = les.get("class_type_name", "")
-    classroom = les.get("classroom", "")
     staff_names = les.get("staffNames", [])
     
     # Сокращаем дисциплину
@@ -94,24 +85,20 @@ def format_lesson(les: dict, lesson_num: int) -> str:
     # Сокращаем тип занятия
     short_class_type = CLASS_TYPE_MAP.get(class_type_name, class_type_name) if class_type_name else ""
     
+    # Берём иконку для типа занятия
+    icon = CLASS_TYPE_ICONS.get(short_class_type, "📝")
+    
     # Берём преподавателя и сокращаем
     teacher = staff_names[0] if staff_names else ""
     short_teacher = shorten_teacher(teacher) if teacher else ""
     
-    # Сокращаем аудиторию
-    short_room = shorten_room(classroom) if classroom else ""
-    
-    icon = get_lesson_icon(discipline)
-    
-    # Формируем минималистичный вывод
+    # Формируем минималистичный вывод (без аудитории, без инициалов)
     res = f"{lesson_num}. {icon} {short_discipline}"
     
     if short_class_type:
         res += f" ({short_class_type})"
     if short_teacher:
         res += f" 👨‍🏫 {short_teacher}"
-    if short_room:
-        res += f" 🚪 {short_room}"
     
     return res
 
