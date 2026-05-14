@@ -91,6 +91,7 @@ def convert_date_format(date_str: str) -> str:
 
 async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
     schedule = {}
+    debug_logged_dates = set()
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -126,14 +127,19 @@ async def scrape_schedule_api(group_id: str, months_count: int = 2) -> dict:
                             if not date_str:
                                 continue
                             
-                            # Преобразуем формат даты из ДД.МММ.ГГГГ в ГГГГ-ММ-ДД
-                            date_str = convert_date_format(date_str)
+                            # Логируем по одной паре с каждой даты
+                            if date_str not in debug_logged_dates:
+                                logger.info(f"[DEBUG {date_str}] Пара: {json.dumps(lesson, ensure_ascii=False, indent=2)[:1500]}")
+                                debug_logged_dates.add(date_str)
                             
-                            if date_str not in schedule:
-                                schedule[date_str] = []
+                            # Преобразуем формат даты из ДД.МММ.ГГГГ в ГГГГ-ММ-ДД
+                            date_str_converted = convert_date_format(date_str)
+                            
+                            if date_str_converted not in schedule:
+                                schedule[date_str_converted] = []
                             
                             formatted = format_lesson(lesson)
-                            schedule[date_str].append(formatted)
+                            schedule[date_str_converted].append(formatted)
 
                 await asyncio.sleep(1)
 
