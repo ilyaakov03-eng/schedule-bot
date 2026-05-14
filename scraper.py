@@ -1,5 +1,5 @@
 """
-scraper.py — финальная версия парсинга
+scraper.py — финальная версия парcинга
 """
 
 import asyncio
