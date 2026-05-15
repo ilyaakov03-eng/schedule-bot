@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, date
 import pytz
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from aiohttp import web
 
 from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS_RUS
 
@@ -82,8 +83,12 @@ def get_schedule() -> dict:
 
 def is_direct_command(text: str) -> bool:
     """Проверяет, это ли прямая команда боту (начинается с пар/расписание)"""
-    # Только если сообщение НАЧИНАЕТСЯ с ключевых слов
     return text.startswith(("пары", "расписание", "когда", "следующая", "следующий", "обновить"))
+
+
+async def health_check(request):
+    """Endpoint для проверки здоровья сервиса"""
+    return web.Response(text="OK", status=200)
 
 
 async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
@@ -113,7 +118,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
     now = datetime.now(VLAD_TZ)
 
-    # Проверяем, это ли прямая команда боту
     if not is_direct_command(text):
         return
 
@@ -125,7 +129,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sched = get_schedule()
 
-    # Принудительное обновление
     if any(w in text for w in ["обновить расписание", "обнови расписание", "refresh", "/refresh"]):
         await update.message.reply_text("🔄 Обновляю расписание с сайта, подожди немного...")
         global _schedule_cache
@@ -141,7 +144,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не удалось получить расписание с сайта.")
         return
 
-    # Когда следующая [предмет]
     if "когда" in text or "следующая" in text or "следующий" in text:
         target = None
         for alias, full in SUBJECT_ALIASES.items():
@@ -179,7 +181,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📭 В ближайшие 2 недели пар не нашёл.")
             return
 
-    # Пары сегодня / завтра / дата
     if any(w in text for w in ["пары", "расписание"]):
         target_date = None
 
@@ -314,20 +315,33 @@ async def post_init(application):
 
 
 if __name__ == "__main__":
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_TOKEN)
-        .post_init(post_init)
-        .connect_timeout(60.0)
-        .read_timeout(120.0)
-        .write_timeout(60.0)
-        .pool_timeout(60.0)
-        .build()
-    )
+    async def run_all():
+        # Запускаем веб-сервер для health check
+        app_web = web.Application()
+        app_web.router.add_get('/health', health_check)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        await site.start()
+        logger.info("Health check сервер запущен на порту 8080")
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("refresh", cmd_refresh))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        # Запускаем Telegram бота
+        app = (
+            ApplicationBuilder()
+            .token(TELEGRAM_TOKEN)
+            .post_init(post_init)
+            .connect_timeout(60.0)
+            .read_timeout(120.0)
+            .write_timeout(60.0)
+            .pool_timeout(60.0)
+            .build()
+        )
 
-    logger.info("✅ Бот запущен!")
-    app.run_polling(drop_pending_updates=True, timeout=60)
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("refresh", cmd_refresh))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        logger.info("✅ Бот запущен!")
+        await app.run_polling(drop_pending_updates=True, timeout=60)
+
+    asyncio.run(run_all())
