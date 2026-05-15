@@ -1,5 +1,6 @@
 """
-bot.py — Телеграм-бот с HTTP сервером для Uptime Robot
+bot.py — Телеграм-бот расписания ДВЮИ МВД России
+Группа: Ю 16 ПОНБ 2022 (4 курс, юриспруденция)
 """
 
 import asyncio
@@ -7,18 +8,20 @@ import logging
 import random
 import re
 from datetime import datetime, timedelta, date
-from aiohttp import web
 
 import pytz
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from aiohttp import web
 
 from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS_RUS
 
+# ──────────────────────────────────────────────
 TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
-CACHE_PATH = "./schedule_cache.json"
+CACHE_PATH = "schedule_cache.json"
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
+# ──────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +81,16 @@ def get_schedule() -> dict:
     return _schedule_cache
 
 
+def is_direct_command(text: str) -> bool:
+    """Проверяет, это ли прямая команда боту (начинается с пар/расписание)"""
+    return text.startswith(("пары", "расписание", "когда", "следующая", "следующий", "обновить"))
+
+
+async def health_check(request):
+    """Endpoint для проверки здоровья сервиса"""
+    return web.Response(text="OK", status=200)
+
+
 async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
     global _schedule_cache
     logger.info("Фоновое обновление расписания...")
@@ -104,6 +117,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = (user.username or "").lower().strip()
     text = update.message.text.lower().strip()
     now = datetime.now(VLAD_TZ)
+
+    if not is_direct_command(text):
+        return
 
     asks_schedule = any(w in text for w in ["пары", "расписание", "когда", "следующая", "следующий"])
     if username == BANNED_USER:
@@ -174,6 +190,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_date = (now + timedelta(days=1)).date()
         elif "послезавтра" in text:
             target_date = (now + timedelta(days=2)).date()
+        elif any(day in text for day in ["понедельник", "пн"]):
+            days_ahead = 0 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["вторник", "вт"]):
+            days_ahead = 1 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["среда", "ср"]):
+            days_ahead = 2 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["четверг", "чт"]):
+            days_ahead = 3 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
+        elif any(day in text for day in ["пятница", "пт"]):
+            days_ahead = 4 - now.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            target_date = now.date() + timedelta(days=days_ahead)
         elif "неделю" in text:
             monday = now.date() - timedelta(days=now.weekday())
             await _send_week(update, sched, monday, "Текущая неделя")
@@ -273,61 +314,34 @@ async def post_init(application):
     logger.info(f"Авто-обновление каждые {CACHE_REFRESH_HOURS} часов настроено.")
 
 
-# HTTP обработчик для Uptime Robot
-async def health_check(request):
-    """Отвечает на HTTP запросы от Uptime Robot"""
-    return web.Response(text="OK", status=200)
-
-
-async def main():
-    # Создаём Telegram бота
-    app = (
-        ApplicationBuilder()
-        .token(TELEGRAM_TOKEN)
-        .post_init(post_init)
-        .connect_timeout(60.0)
-        .read_timeout(120.0)
-        .write_timeout(60.0)
-        .pool_timeout(60.0)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("refresh", cmd_refresh))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Создаём HTTP сервер для Uptime Robot
-    web_app = web.Application()
-    web_app.router.add_get("/", health_check)
-    web_app.router.add_get("/health", health_check)
-    
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    
-    logger.info("✅ HTTP сервер запущен на порту 8080")
-    logger.info("✅ Бот запущен!")
-
-    # Запускаем Telegram polling
-    async with app:
-        await app.start()
-        await app.updater.start_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-        )
-        # Блокируем чтобы сервер не завершился
-        try:
-            await asyncio.Future()  # Будет ждать бесконечно
-        except KeyboardInterrupt:
-            pass
-        finally:
-            await app.updater.stop()
-            await app.stop()
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
-BOTEOF
+    async def run_all():
+        # Запускаем веб-сервер для health check
+        app_web = web.Application()
+        app_web.router.add_get('/health', health_check)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        await site.start()
+        logger.info("Health check сервер запущен на порту 8080")
 
-echo "✅ Готово!"
+        # Запускаем Telegram бота
+        app = (
+            ApplicationBuilder()
+            .token(TELEGRAM_TOKEN)
+            .post_init(post_init)
+            .connect_timeout(60.0)
+            .read_timeout(120.0)
+            .write_timeout(60.0)
+            .pool_timeout(60.0)
+            .build()
+        )
+
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("refresh", cmd_refresh))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        logger.info("✅ Бот запущен!")
+        await app.run_polling(drop_pending_updates=True, timeout=60)
+
+    asyncio.run(run_all())
