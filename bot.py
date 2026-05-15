@@ -315,36 +315,45 @@ async def post_init(application):
 
 
 if __name__ == "__main__":
-    async def run_all():
-        import os
+    import os
+    import threading
+    
+    # Запускаем веб-сервер в отдельном потоке
+    def run_web_server():
+        async def web_app():
+            port = int(os.getenv("PORT", 8080))
+            app_web = web.Application()
+            app_web.router.add_get('/health', health_check)
+            runner = web.AppRunner(app_web)
+            await runner.setup()
+            site = web.TCPSite(runner, '0.0.0.0', port)
+            await site.start()
+            logger.info(f"Health check сервер запущен на порту {port}")
+            # Держим сервер запущенным
+            await asyncio.Event().wait()
         
-        # Запускаем веб-сервер для health check
-        port = int(os.getenv("PORT", 8080))
-        app_web = web.Application()
-        app_web.router.add_get('/health', health_check)
-        runner = web.AppRunner(app_web)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', port)
-        await site.start()
-        logger.info(f"Health check сервер запущен на порту {port}")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(web_app())
+    
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    
+    # Запускаем Telegram бота в основном потоке
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .connect_timeout(60.0)
+        .read_timeout(120.0)
+        .write_timeout(60.0)
+        .pool_timeout(60.0)
+        .build()
+    )
 
-        # Запускаем Telegram бота
-        app = (
-            ApplicationBuilder()
-            .token(TELEGRAM_TOKEN)
-            .post_init(post_init)
-            .connect_timeout(60.0)
-            .read_timeout(120.0)
-            .write_timeout(60.0)
-            .pool_timeout(60.0)
-            .build()
-        )
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("refresh", cmd_refresh))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-        app.add_handler(CommandHandler("start", cmd_start))
-        app.add_handler(CommandHandler("refresh", cmd_refresh))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-        logger.info("✅ Бот запущен!")
-        await app.run_polling(drop_pending_updates=True, timeout=60)
-
-    asyncio.run(run_all())
+    logger.info("✅ Бот запущен!")
+    app.run_polling(drop_pending_updates=True, timeout=60)
