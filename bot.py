@@ -280,7 +280,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>пары сегодня</code> / <code>пары завтра</code>\n"
         "• <code>пары 15 мая</code> / <code>пары 15.05</code>\n"
         "• <code>расписание на неделю</code>\n"
-        "• <code>когда кримка</code> / <code>следующая упп</code>\n"
+        "• <code>когда фп</code> / <code>следующая тсп</code>\n"
         "• <code>обновить расписание</code>\n\n"
         f"Расписание загружено: <b>{len(get_schedule())} дней</b>",
         parse_mode="HTML",
