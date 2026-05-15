@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/bot_with_http.py << 'BOTEOF'
 """
 bot.py — Телеграм-бот с HTTP сервером для Uptime Robot
 """
