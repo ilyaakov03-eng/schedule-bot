@@ -316,14 +316,17 @@ async def post_init(application):
 
 if __name__ == "__main__":
     async def run_all():
+        import os
+        
         # Запускаем веб-сервер для health check
+        port = int(os.getenv("PORT", 8080))
         app_web = web.Application()
         app_web.router.add_get('/health', health_check)
         runner = web.AppRunner(app_web)
         await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
-        logger.info("Health check сервер запущен на порту 8080")
+        logger.info(f"Health check сервер запущен на порту {port}")
 
         # Запускаем Telegram бота
         app = (
