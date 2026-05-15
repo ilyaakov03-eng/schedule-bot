@@ -17,7 +17,7 @@ from aiohttp import web
 from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS_RUS
 
 # ──────────────────────────────────────────────
-TELEGRAM_TOKEN = "7864155748:AAG1yQLUQ1XAZd7nCq4xogZVOsyxa1VNWyE"
+TELEGRAM_TOKEN = "8256514455:AAGOzHU6hL9Pi61qdIoPQOqQEtiHDCgI3Yw"
 CACHE_PATH = "schedule_cache.json"
 VLAD_TZ = pytz.timezone("Asia/Vladivostok")
 CACHE_REFRESH_HOURS = 6
