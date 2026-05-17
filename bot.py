@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BANNED_USER = "minomet28"
+BANNED_USER = "SergoSolyara"
 
 ROAST_REPLIES = [
     "🚫 Расписание для тебя: 1 пара — иди нахуй, 2 пара — продолжай идти нахуй.",
