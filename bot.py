@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BANNED_USER = "SergoSolyara"
+BANNED_USERS = {"sergosolyara", "ilya_koval_q"}  # нижний регистр — username уже .lower()
 
 ROAST_REPLIES = [
     "🚫 Расписание для тебя: 1 пара — иди нахуй, 2 пара — продолжай идти нахуй.",
@@ -132,7 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     asks_schedule = any(w in text for w in ["пары", "расписание", "когда", "следующая", "следующий"])
-    if username == BANNED_USER:
+    if username in BANNED_USERS:
         if asks_schedule:
             await update.message.reply_text(random.choice(ROAST_REPLIES), parse_mode="HTML")
         return
