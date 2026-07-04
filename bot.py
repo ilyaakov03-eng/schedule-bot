@@ -22,7 +22,9 @@ from materials import (
     find_lessons,
     find_material_for_lesson,
     find_subject_id,
+    format_exam_questions_message,
     format_material_message,
+    get_exam_questions,
     load_materials,
     parse_requested_date,
     split_telegram_message,
@@ -73,6 +75,11 @@ def is_direct_command(text: str) -> bool:
             "сколько осталось",
         )
     )
+
+
+def is_exam_command(text: str) -> bool:
+    text = text.lower().strip().replace("ё", "е")
+    return ("вопрос" in text and "зачет" in text) or text.startswith("/exam")
 
 
 def is_materials_command(text: str) -> bool:
@@ -127,6 +134,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.lower().strip()
     if not is_direct_command(text):
+        return
+
+    if is_exam_command(text):
+        await handle_exam_request(update, text)
         return
 
     if is_materials_command(text):
@@ -232,6 +243,34 @@ async def handle_materials_request(update: Update, text: str):
                 f"{lesson.get('class_type')} · тема {lesson.get('topic_code') or 'не указана'}"
             )
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def handle_exam_request(update: Update, text: str):
+    materials = _materials_cache or load_materials()
+
+    subject_id = find_subject_id(text, materials)
+    if not subject_id:
+        await update.message.reply_text(
+            "Укажи дисциплину: например\n"
+            "• <code>вопросы на зачёт предпринимательское</code>\n"
+            "• <code>вопросы на зачёт наркотики</code>\n"
+            "• <code>вопросы на зачёт личность</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    discipline = subject_discipline(subject_id, materials)
+    questions = get_exam_questions(subject_id, materials)
+
+    if not questions:
+        await update.message.reply_text(
+            f"Вопросов на зачёт по дисциплине «{discipline}» пока нет в базе."
+        )
+        return
+
+    msg = format_exam_questions_message(discipline, questions)
+    for chunk in split_telegram_message(msg):
+        await update.message.reply_text(chunk, parse_mode="HTML")
 
 
 async def refresh_now(update: Update):
@@ -396,6 +435,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>когда налоговое</code>\n"
         "• <code>задания налоговое 26.06</code>\n"
         "• <code>задания наркотики завтра</code>\n"
+        "• <code>вопросы на зачёт предпринимательское</code>\n"
         "• <code>сколько осталось учиться</code>\n\n"
         f"Расписание загружено: <b>{len(get_schedule())} дней</b>",
         parse_mode="HTML",
@@ -410,6 +450,11 @@ async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "задания " + " ".join(context.args)
     await handle_materials_request(update, text)
+
+
+async def cmd_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = "вопросы на зачёт " + " ".join(context.args)
+    await handle_exam_request(update, text)
 
 
 async def post_init(application):
@@ -473,6 +518,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("tasks", cmd_tasks))
+    app.add_handler(CommandHandler("exam", cmd_exam))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ Бот запущен!")

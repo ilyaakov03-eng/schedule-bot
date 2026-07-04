@@ -200,6 +200,23 @@ def format_material_message(lesson: dict, material: dict, lesson_date: date) -> 
     return "\n".join(lines)
 
 
+def get_exam_questions(subject_id: str, materials: dict) -> list[str]:
+    return materials.get("exam_questions", {}).get(subject_id, [])
+
+
+def format_exam_questions_message(discipline: str, questions: list[str]) -> str:
+    lines = [
+        "🎓 <b>Вопросы на зачёт</b>",
+        f"📖 <b>{discipline}</b>",
+        f"Всего вопросов: {len(questions)}",
+        "",
+    ]
+    for idx, question in enumerate(questions, start=1):
+        lines.append(f"{idx}. {question}")
+
+    return "\n".join(lines)
+
+
 def split_telegram_message(text: str, limit: int = 3900) -> list[str]:
     if len(text) <= limit:
         return [text]
