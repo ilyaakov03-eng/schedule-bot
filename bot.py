@@ -1,27 +1,45 @@
 """
-bot.py — Телеграм-бот расписания ДВЮИ МВД России
-Группа: Ю 16 ПОНБ 2022 (4 курс, юриспруденция)
+Телеграм-бот расписания ДВЮИ МВД России.
+
+Умеет показывать расписание и находить задания из планов семинарских
+и практических занятий по дисциплине, дате и номеру темы из расписания.
 """
 
 import asyncio
+import json
 import logging
-import random
+import os
 import re
-from datetime import datetime, timedelta, date
+import threading
+from datetime import date, datetime, timedelta
 
 import pytz
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 from aiohttp import web
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from scraper import load_or_refresh_cache, scrape_schedule, MONTHS_MAP, WEEKDAYS_RUS
+from materials import (
+    find_lessons,
+    find_material_for_lesson,
+    find_subject_id,
+    format_material_message,
+    load_materials,
+    parse_requested_date,
+    split_telegram_message,
+    subject_discipline,
+)
+from scraper import MONTHS_MAP, WEEKDAYS_RUS, VLAD_TZ, format_lesson, load_or_refresh_cache, scrape_schedule
 
-# ──────────────────────────────────────────────
-TELEGRAM_TOKEN = "7864155748:AAH5L7SdgnRiLSwfMzRBvOtO7n6Ja41u6AA"
+
+TELEGRAM_TOKEN = (
+    os.getenv("TELEGRAM_TOKEN")
+    or os.getenv("BOT_TOKEN")
+    or os.getenv("API_TOKEN")
+    or ""
+).strip()
 CACHE_PATH = "schedule_cache.json"
-VLAD_TZ = pytz.timezone("Asia/Vladivostok")
-CACHE_REFRESH_HOURS = 6
-# ──────────────────────────────────────────────
+CACHE_REFRESH_HOURS = int(os.getenv("CACHE_REFRESH_HOURS", "6"))
+STUDY_END_DATE = os.getenv("STUDY_END_DATE", "2026-06-30")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,62 +47,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BANNED_USERS = {935910765, 838622908, 1217137884}
-
-ROAST_REPLIES = [
-    "🚫 Расписание для тебя: 1 пара — иди нахуй, 2 пара — продолжай идти нахуй.",
-    "📅 Твоё расписание: весь день — быть клоуном. Ты справляешься на отлично.",
-    "🤡 О, это опять ты. Расписание для дебилов не завезли, извини.",
-    "📖 Пары для тебя отменены. Причина: ты безнадёжен.",
-    "❌ Бот временно не обслуживает людей с IQ ниже комнатной температуры.",
-    "🗑️ Твоё расписание находится там же, где и твоё будущее — в мусорке.",
-    "🧠 Ошибка: мозг пользователя не обнаружен. Расписание показать невозможно.",
-    "🧹 Расписание для отбросов общества не предусмотрено. Иди подметай двор.",
-    "🐒 К сожалению, расписание доступно только для людей.",
-    "🐷 Даже свиньи в навозе найдут больше пользы, чем ты на парах.",
-    "🧹 Иди лучше полы драить в дежурке, чем мне мозг выносить.",
-    "🎪 Цирк уехал, а ты остался. Расписание для клоунов отменено.",
-    "🧟 Судя по активности мозга, тебе пора не на пары, а на кладбище.",
-    "⚰️ Даже расписание твоих похорон интереснее, чем твоя учёба.",
-    "🤖 Системная ошибка: пользователь слишком тупой для обработки запроса.",
-    "💉 Тебе не в универ, а на лечение. Даже я устал от твоего уровня.",
-    "🧻 Ты настолько бесполезен, что даже туалетная бумага имеет больше ценности.",
-    "🖌️ Маляр ждёт тебя в наряде, иди крась, может хоть там от тебя будет польза.",
-    "🧦 Ты даже носки нормально не умеешь складывать, какое нахуй расписание.",
-    "🍽️ В столовой готовят лучше, чем ты учишься. А это уже диагноз.",
-    "🪖 Ты — тот, из-за которого весь курс на субботник ставят.",
-    "💀 Даже в морге лежать приятнее, чем с тобой на одной паре сидеть.",
-]
-
-SUBJECT_ALIASES = {
-    "упп": "Уголовно-процессуальное право",
-    "гпп": "Гражданское процессуальное право",
-    "уп": "Уголовное право",
-    "гп": "Гражданское право",
-    "фп": "Физическая подготовка",
-    "физо": "Физическая подготовка",
-    "физ": "Физическая подготовка",
-    "кримке": "Криминалистика",
-    "кримка": "Криминалистика",
-    "крим": "Криминалистика",
-    "огневой": "Огневая подготовка",
-    "огневая": "Огневая подготовка",
-    "огнев": "Огневая подготовка",
-    "тсп": "Тактико-специальная подготовка",
-    "тактико": "Тактико-специальная подготовка",
-    "малолеткам": "Несовершеннолетних",
-    "несоверш": "Несовершеннолетних",
-    "орд": "Основы оперативно-розыскной деятельности",
-    "оперативно": "Основы оперативно-розыскной деятельности",
-    "конституц": "Конституционное право",
-    "кп": "Конституционное право",
-    "ап": "Административное право",
-    "адм": "Административное право",
-    "фин": "Финансовое право",
-    "нал": "Налоговое право",
-}
-
 _schedule_cache: dict = {}
+_materials_cache: dict = {}
 
 
 def get_schedule() -> dict:
@@ -92,12 +56,53 @@ def get_schedule() -> dict:
 
 
 def is_direct_command(text: str) -> bool:
-    """Проверяет, это ли прямая команда боту (начинается с пар/расписание)"""
-    return text.startswith(("пары", "расписание", "когда", "следующая", "следующий", "обновить"))
+    text = text.lower().strip()
+    return text.startswith(
+        (
+            "пары",
+            "расписание",
+            "когда",
+            "следующая",
+            "следующий",
+            "обновить",
+            "обнови",
+            "задания",
+            "задание",
+            "дз",
+            "вопросы",
+            "сколько осталось",
+        )
+    )
+
+
+def is_materials_command(text: str) -> bool:
+    text = text.lower().strip()
+    return text.startswith(("задания", "задание", "дз", "вопросы")) or text.startswith("/tasks")
+
+
+def is_structured_schedule(schedule: dict) -> bool:
+    for lessons in schedule.values():
+        if lessons:
+            return isinstance(lessons[0], dict)
+    return True
+
+
+def lesson_text(lesson, lesson_num: int | None = None) -> str:
+    if isinstance(lesson, dict):
+        return lesson.get("text") or format_lesson(lesson, lesson_num)
+    return str(lesson)
+
+
+def save_schedule_cache(schedule: dict) -> None:
+    with open(CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(
+            {"schedule": schedule, "updated_at": datetime.now().isoformat()},
+            f,
+            ensure_ascii=False,
+        )
 
 
 async def health_check(request):
-    """Endpoint для проверки здоровья сервиса"""
     return web.Response(text="OK", status=200)
 
 
@@ -108,153 +113,196 @@ async def refresh_schedule_task(context: ContextTypes.DEFAULT_TYPE):
         data = await scrape_schedule()
         if data:
             _schedule_cache = data
-            import json
-            from datetime import datetime as dt
-            with open(CACHE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"schedule": data, "updated_at": dt.now().isoformat()}, f, ensure_ascii=False)
-            logger.info(f"Расписание обновлено: {len(data)} дней")
+            save_schedule_cache(data)
+            logger.info("Расписание обновлено: %s дней", len(data))
         else:
             logger.warning("Обновление не дало результата")
     except Exception as e:
-        logger.error(f"Ошибка фонового обновления: {e}", exc_info=True)
+        logger.error("Ошибка фонового обновления: %s", e, exc_info=True)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    user = update.message.from_user
-    username = (user.username or "").lower().strip()
     text = update.message.text.lower().strip()
-    now = datetime.now(VLAD_TZ)
-
     if not is_direct_command(text):
         return
 
-    asks_schedule = any(w in text for w in ["пары", "расписание", "когда", "следующая", "следующий"])
-    if user.id in BANNED_USERS:
-        if asks_schedule:
-            await update.message.reply_text(random.choice(ROAST_REPLIES), parse_mode="HTML")
+    if is_materials_command(text):
+        await handle_materials_request(update, text)
         return
 
-    sched = get_schedule()
+    if "сколько осталось" in text:
+        await send_days_left(update)
+        return
 
     if any(w in text for w in ["обновить расписание", "обнови расписание", "refresh", "/refresh"]):
         await update.message.reply_text("🔄 Обновляю расписание с сайта, подожди немного...")
-        global _schedule_cache
-        data = await scrape_schedule()
-        if data:
-            _schedule_cache = data
-            import json
-            from datetime import datetime as dt
-            with open(CACHE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"schedule": data, "updated_at": dt.now().isoformat()}, f, ensure_ascii=False)
-            await update.message.reply_text(f"✅ Готово! Загружено {len(data)} дней расписания.")
-        else:
-            await update.message.reply_text("❌ Не удалось получить расписание с сайта.")
+        await refresh_now(update)
         return
+
+    sched = get_schedule()
+    now = datetime.now(VLAD_TZ)
 
     if "когда" in text or "следующая" in text or "следующий" in text:
-        target = None
-        for alias, full in SUBJECT_ALIASES.items():
-            if alias in text or full.lower() in text:
-                target = (alias, full)
-                break
-
-        if target:
-            alias, full = target
-            for i in range(1, 45):
-                d = (now + timedelta(days=i)).date()
-                day_lessons = sched.get(d.strftime("%Y-%m-%d"), [])
-                for lesson in day_lessons:
-                    if full.lower() in lesson.lower() or alias in lesson.lower():
-                        day_name = WEEKDAYS_RUS[d.weekday()]
-                        await update.message.reply_text(
-                            f"🔎 <b>Ближайшая пара — {full}:</b>\n"
-                            f"📅 {d.strftime('%d.%m')} ({day_name})\n{lesson}",
-                            parse_mode="HTML",
-                        )
-                        return
-            await update.message.reply_text(f"❌ «{full}» не нашёл в расписании на ближайшие 6 недель.")
-            return
-
-        if not any(w in text for w in ["пары", "расписание"]):
-            for i in range(0, 14):
-                d = (now + timedelta(days=i)).date()
-                day_lessons = sched.get(d.strftime("%Y-%m-%d"), [])
-                if day_lessons:
-                    day_name = WEEKDAYS_RUS[d.weekday()]
-                    msg = f"📅 <b>Ближайший учебный день — {d.strftime('%d.%m')} ({day_name}):</b>\n\n"
-                    msg += "\n".join(day_lessons)
-                    await update.message.reply_text(msg, parse_mode="HTML")
-                    return
-            await update.message.reply_text("📭 В ближайшие 2 недели пар не нашёл.")
-            return
-
-    if any(w in text for w in ["пары", "расписание"]):
-        target_date = None
-
-        if "сегодня" in text:
-            target_date = now.date()
-        elif "завтра" in text:
-            target_date = (now + timedelta(days=1)).date()
-        elif "послезавтра" in text:
-            target_date = (now + timedelta(days=2)).date()
-        elif any(day in text for day in ["понедельник", "пн"]):
-            days_ahead = 0 - now.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            target_date = now.date() + timedelta(days=days_ahead)
-        elif any(day in text for day in ["вторник", "вт"]):
-            days_ahead = 1 - now.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            target_date = now.date() + timedelta(days=days_ahead)
-        elif any(day in text for day in ["среда", "ср"]):
-            days_ahead = 2 - now.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            target_date = now.date() + timedelta(days=days_ahead)
-        elif any(day in text for day in ["четверг", "чт"]):
-            days_ahead = 3 - now.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            target_date = now.date() + timedelta(days=days_ahead)
-        elif any(day in text for day in ["пятница", "пт"]):
-            days_ahead = 4 - now.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            target_date = now.date() + timedelta(days=days_ahead)
-        elif "неделю" in text:
-            monday = now.date() - timedelta(days=now.weekday())
-            await _send_week(update, sched, monday, "Текущая неделя")
-            return
-        else:
-            dm = re.search(r"(\d{1,2})\s+([а-яё]+)", text)
-            if dm:
-                day = int(dm.group(1))
-                month = MONTHS_MAP.get(dm.group(2))
-                if month:
-                    target_date = date(now.year, month, day)
-            else:
-                dm2 = re.search(r"(\d{1,2})\.(\d{1,2})", text)
-                if dm2:
-                    target_date = date(now.year, int(dm2.group(2)), int(dm2.group(1)))
-
-        if target_date:
-            await _send_day(update, sched, target_date)
-        else:
-            await _send_day(update, sched, now.date())
+        await send_next_lesson(update, text, sched, now)
         return
 
+    if any(w in text for w in ["пары", "расписание"]):
+        target_date = parse_schedule_date(text, now)
+        if target_date is None and "следующ" in text and "недел" in text:
+            monday = now.date() - timedelta(days=now.weekday()) + timedelta(days=7)
+            await send_week(update, sched, monday, "Следующая неделя")
+            return
+        if target_date is None and "недел" in text:
+            monday = now.date() - timedelta(days=now.weekday())
+            await send_week(update, sched, monday, "Текущая неделя")
+            return
+        await send_day(update, sched, target_date or now.date())
 
-async def _send_day(update: Update, sched: dict, target_date: date):
+
+async def handle_materials_request(update: Update, text: str):
+    sched = get_schedule()
+    materials = _materials_cache or load_materials()
+    now = datetime.now(VLAD_TZ)
+
+    subject_id = find_subject_id(text, materials)
+    if not subject_id:
+        await update.message.reply_text(
+            "Укажи дисциплину: например\n"
+            "• <code>задания налоговое 26.06</code>\n"
+            "• <code>задания наркотики завтра</code>\n"
+            "• <code>задания личность пятница</code>\n"
+            "• <code>задания предпринимательское</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    target_date = parse_requested_date(text, now)
+    lessons = find_lessons(sched, subject_id, materials, target_date)
+    discipline = subject_discipline(subject_id, materials)
+
+    if not lessons:
+        if target_date:
+            await update.message.reply_text(
+                f"Не нашёл пару по дисциплине «{discipline}» на {target_date.strftime('%d.%m')}."
+            )
+        else:
+            await update.message.reply_text(
+                f"Не нашёл ближайшую пару по дисциплине «{discipline}» в загруженном расписании."
+            )
+        return
+
+    sent_any = False
+    missing = []
+    seen = set()
+
+    for lesson in lessons:
+        if not isinstance(lesson, dict):
+            continue
+
+        lesson_date = date.fromisoformat(lesson["date"])
+        material = find_material_for_lesson(lesson, materials)
+        dedupe_key = (
+            lesson.get("discipline"),
+            lesson.get("class_type"),
+            lesson.get("topic_code"),
+            lesson_date.isoformat(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        if not material:
+            missing.append(lesson)
+            continue
+
+        msg = format_material_message(lesson, material, lesson_date)
+        for chunk in split_telegram_message(msg):
+            await update.message.reply_text(chunk, parse_mode="HTML")
+        sent_any = True
+
+    if not sent_any:
+        lines = [f"Пара найдена, но заданий в базе пока нет: <b>{discipline}</b>"]
+        for lesson in missing:
+            lines.append(
+                f"• {lesson.get('date')} · {lesson.get('lesson_time')} · "
+                f"{lesson.get('class_type')} · тема {lesson.get('topic_code') or 'не указана'}"
+            )
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def refresh_now(update: Update):
+    global _schedule_cache
+    data = await scrape_schedule()
+    if data:
+        _schedule_cache = data
+        save_schedule_cache(data)
+        await update.message.reply_text(f"✅ Готово! Загружено {len(data)} дней расписания.")
+    else:
+        await update.message.reply_text("❌ Не удалось получить расписание с сайта.")
+
+
+def parse_schedule_date(text: str, now: datetime) -> date | None:
+    if "недел" in text:
+        return None
+
+    parsed = parse_requested_date(text, now)
+    if parsed:
+        return parsed
+
+    match = re.search(r"(\d{1,2})\s+([а-яё]+)", text)
+    if match:
+        day = int(match.group(1))
+        month = MONTHS_MAP.get(match.group(2))
+        if month:
+            return date(now.year, month, day)
+
+    return None
+
+
+async def send_next_lesson(update: Update, text: str, sched: dict, now: datetime):
+    materials = _materials_cache or load_materials()
+    subject_id = find_subject_id(text, materials)
+
+    if subject_id:
+        lessons = find_lessons(sched, subject_id, materials, None)
+        if lessons:
+            lesson = lessons[0]
+            d = date.fromisoformat(lesson["date"])
+            day_name = WEEKDAYS_RUS[d.weekday()]
+            await update.message.reply_text(
+                f"🔎 <b>Ближайшая пара — {lesson.get('discipline')}:</b>\n"
+                f"📅 {d.strftime('%d.%m')} ({day_name}) · {lesson.get('lesson_time')}\n"
+                f"{lesson_text(lesson)}",
+                parse_mode="HTML",
+            )
+            return
+
+        await update.message.reply_text("Не нашёл эту дисциплину в ближайшем расписании.")
+        return
+
+    for i in range(0, 14):
+        d = (now + timedelta(days=i)).date()
+        day_lessons = sched.get(d.strftime("%Y-%m-%d"), [])
+        if day_lessons:
+            day_name = WEEKDAYS_RUS[d.weekday()]
+            msg = f"📅 <b>Ближайший учебный день — {d.strftime('%d.%m')} ({day_name}):</b>\n\n"
+            msg += "\n".join(lesson_text(lesson, idx + 1) for idx, lesson in enumerate(day_lessons))
+            await update.message.reply_text(msg, parse_mode="HTML")
+            return
+
+    await update.message.reply_text("📭 В ближайшие 2 недели пар не нашёл.")
+
+
+async def send_day(update: Update, sched: dict, target_date: date):
     day_name = WEEKDAYS_RUS[target_date.weekday()]
     date_fmt = target_date.strftime("%d.%m")
     lessons = sched.get(target_date.strftime("%Y-%m-%d"), [])
 
     msg = f"📅 <b>Расписание на {date_fmt} ({day_name}):</b>\n\n"
-    msg += "\n".join(lessons) if lessons else "Пар нет — отдыхаем! ✨"
+    msg += "\n".join(lesson_text(lesson, idx + 1) for idx, lesson in enumerate(lessons)) if lessons else "Пар нет — отдыхаем! ✨"
 
     if not sched:
         msg += "\n\n⚠️ <i>Расписание не загружено. Напиши «обновить расписание»</i>"
@@ -262,7 +310,7 @@ async def _send_day(update: Update, sched: dict, target_date: date):
     await update.message.reply_text(msg, parse_mode="HTML")
 
 
-async def _send_week(update: Update, sched: dict, monday: date, title: str):
+async def send_week(update: Update, sched: dict, monday: date, title: str):
     lines = [f"📆 <b>{title}:</b>\n"]
     has_any = False
     for i in range(6):
@@ -272,7 +320,7 @@ async def _send_week(update: Update, sched: dict, monday: date, title: str):
         lines.append(f"<b>— {d.strftime('%d.%m')} {day_name}:</b>")
         if lessons:
             has_any = True
-            lines.extend(lessons)
+            lines.extend(lesson_text(lesson, idx + 1) for idx, lesson in enumerate(lessons))
         else:
             lines.append("  Пар нет")
         lines.append("")
@@ -283,73 +331,94 @@ async def _send_week(update: Update, sched: dict, monday: date, title: str):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+async def send_days_left(update: Update):
+    try:
+        end_date = date.fromisoformat(STUDY_END_DATE)
+    except ValueError:
+        await update.message.reply_text("Дата окончания учёбы задана неверно в STUDY_END_DATE.")
+        return
+
+    today = datetime.now(VLAD_TZ).date()
+    days_left = max((end_date - today).days, 0)
+    await update.message.reply_text(
+        f"До конца учёбы осталось: <b>{days_left}</b> дней.\n"
+        f"Ориентир: {end_date.strftime('%d.%m.%Y')}",
+        parse_mode="HTML",
+    )
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет! Я бот расписания группы <b>Ю 16 ПОНБ 2022</b>.\n\n"
         "Что умею:\n"
         "• <code>пары сегодня</code> / <code>пары завтра</code>\n"
-        "• <code>пары 15 мая</code> / <code>пары 15.05</code>\n"
-        "• <code>расписание на неделю</code>\n"
-        "• <code>когда фп</code> / <code>следующая тсп</code>\n"
-        "• <code>обновить расписание</code>\n\n"
+        "• <code>расписание на неделю</code> / <code>расписание следующая неделя</code>\n"
+        "• <code>когда налоговое</code>\n"
+        "• <code>задания налоговое 26.06</code>\n"
+        "• <code>задания наркотики завтра</code>\n"
+        "• <code>сколько осталось учиться</code>\n\n"
         f"Расписание загружено: <b>{len(get_schedule())} дней</b>",
         parse_mode="HTML",
     )
 
 
 async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_message(update, context)
+    await update.message.reply_text("🔄 Обновляю расписание с сайта...")
+    await refresh_now(update)
+
+
+async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = "задания " + " ".join(context.args)
+    await handle_materials_request(update, text)
 
 
 async def post_init(application):
-    global _schedule_cache
+    global _schedule_cache, _materials_cache
+
+    _materials_cache = load_materials()
+    logger.info("Материалы загружены: %s записей", len(_materials_cache.get("items", [])))
 
     logger.info("Загружаю расписание при старте...")
     data = await load_or_refresh_cache(CACHE_PATH, max_age_hours=CACHE_REFRESH_HOURS)
-    if data:
-        _schedule_cache = data
-        logger.info(f"Расписание загружено: {len(data)} дней")
-    else:
-        logger.warning("Расписание пустое — запускаю скрапинг")
+    if data and not is_structured_schedule(data):
+        logger.info("Кэш старого формата, обновляю расписание")
         data = await scrape_schedule()
-        _schedule_cache = data or {}
 
-    job_queue = application.job_queue
-    job_queue.run_repeating(
+    _schedule_cache = data or {}
+    logger.info("Расписание загружено: %s дней", len(_schedule_cache))
+
+    application.job_queue.run_repeating(
         refresh_schedule_task,
         interval=CACHE_REFRESH_HOURS * 3600,
         first=CACHE_REFRESH_HOURS * 3600,
         name="auto_refresh",
     )
-    logger.info(f"Авто-обновление каждые {CACHE_REFRESH_HOURS} часов настроено.")
+
+
+def run_web_server():
+    async def web_app():
+        port = int(os.getenv("PORT", 8080))
+        app_web = web.Application()
+        app_web.router.add_get("/health", health_check)
+        runner = web.AppRunner(app_web)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info("Health check сервер запущен на порту %s", port)
+        await asyncio.Event().wait()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(web_app())
 
 
 if __name__ == "__main__":
-    import os
-    import threading
-    
-    # Запускаем веб-сервер в отдельном потоке
-    def run_web_server():
-        async def web_app():
-            port = int(os.getenv("PORT", 8080))
-            app_web = web.Application()
-            app_web.router.add_get('/health', health_check)
-            runner = web.AppRunner(app_web)
-            await runner.setup()
-            site = web.TCPSite(runner, '0.0.0.0', port)
-            await site.start()
-            logger.info(f"Health check сервер запущен на порту {port}")
-            # Держим сервер запущенным
-            await asyncio.Event().wait()
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(web_app())
-    
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError("Задай TELEGRAM_TOKEN в переменных окружения Render")
+
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
-    
-    # Запускаем Telegram бота в основном потоке
+
     app = (
         ApplicationBuilder()
         .token(TELEGRAM_TOKEN)
@@ -363,6 +432,7 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("refresh", cmd_refresh))
+    app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("✅ Бот запущен!")

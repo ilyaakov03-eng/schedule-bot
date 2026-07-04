@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+*.log
+schedule_cache.json
+debug_*.png
+test_result.json
