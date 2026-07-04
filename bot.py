@@ -39,7 +39,7 @@ TELEGRAM_TOKEN = (
 ).strip()
 CACHE_PATH = "schedule_cache.json"
 CACHE_REFRESH_HOURS = int(os.getenv("CACHE_REFRESH_HOURS", "6"))
-STUDY_END_DATE = os.getenv("STUDY_END_DATE", "2026-06-30")
+STUDY_END_DATE = os.getenv("STUDY_END_DATE", "").strip()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,11 +151,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if any(w in text for w in ["пары", "расписание"]):
         target_date = parse_schedule_date(text, now)
-        if target_date is None and "следующ" in text and "недел" in text:
+        wants_week = is_week_request(text)
+        if target_date is None and wants_week and "следующ" in text:
             monday = now.date() - timedelta(days=now.weekday()) + timedelta(days=7)
             await send_week(update, sched, monday, "Следующая неделя")
             return
-        if target_date is None and "недел" in text:
+        if target_date is None and wants_week:
             monday = now.date() - timedelta(days=now.weekday())
             await send_week(update, sched, monday, "Текущая неделя")
             return
@@ -245,7 +246,7 @@ async def refresh_now(update: Update):
 
 
 def parse_schedule_date(text: str, now: datetime) -> date | None:
-    if "недел" in text:
+    if is_week_request(text):
         return None
 
     parsed = parse_requested_date(text, now)
@@ -260,6 +261,11 @@ def parse_schedule_date(text: str, now: datetime) -> date | None:
             return date(now.year, month, day)
 
     return None
+
+
+def is_week_request(text: str) -> bool:
+    normalized = text.lower().replace("ё", "е")
+    return bool(re.search(r"\b(на\s+)?неделю\b|\bнеделя\b|\bследующая\s+неделя\b", normalized))
 
 
 async def send_next_lesson(update: Update, text: str, sched: dict, now: datetime):
@@ -332,17 +338,51 @@ async def send_week(update: Update, sched: dict, monday: date, title: str):
 
 
 async def send_days_left(update: Update):
-    try:
-        end_date = date.fromisoformat(STUDY_END_DATE)
-    except ValueError:
-        await update.message.reply_text("Дата окончания учёбы задана неверно в STUDY_END_DATE.")
+    today = datetime.now(VLAD_TZ).date()
+    end_date = None
+    source = ""
+
+    if STUDY_END_DATE:
+        try:
+            end_date = date.fromisoformat(STUDY_END_DATE)
+            source = "STUDY_END_DATE"
+        except ValueError:
+            await update.message.reply_text("Дата окончания учёбы задана неверно в STUDY_END_DATE. Нужен формат YYYY-MM-DD.")
+            return
+
+    if end_date is None:
+        schedule_dates = []
+        for key in get_schedule().keys():
+            try:
+                schedule_dates.append(date.fromisoformat(key))
+            except ValueError:
+                pass
+        future_dates = [d for d in schedule_dates if d >= today]
+        if future_dates:
+            end_date = max(future_dates)
+            source = "последняя дата в загруженном расписании"
+
+    if end_date is None:
+        await update.message.reply_text(
+            "Я не знаю дату окончания учёбы. Добавь в Render переменную "
+            "<code>STUDY_END_DATE</code> в формате <code>YYYY-MM-DD</code>.",
+            parse_mode="HTML",
+        )
         return
 
-    today = datetime.now(VLAD_TZ).date()
-    days_left = max((end_date - today).days, 0)
+    if end_date < today:
+        await update.message.reply_text(
+            f"Дата окончания учёбы сейчас стоит <b>{end_date.strftime('%d.%m.%Y')}</b>, "
+            "она уже прошла. Обнови переменную <code>STUDY_END_DATE</code> в Render.",
+            parse_mode="HTML",
+        )
+        return
+
+    days_left = (end_date - today).days
     await update.message.reply_text(
         f"До конца учёбы осталось: <b>{days_left}</b> дней.\n"
-        f"Ориентир: {end_date.strftime('%d.%m.%Y')}",
+        f"Ориентир: {end_date.strftime('%d.%m.%Y')}\n"
+        f"<i>Источник: {source}</i>",
         parse_mode="HTML",
     )
 

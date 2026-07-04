@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 
 import httpx
@@ -94,17 +95,28 @@ def shorten_teacher(name: str) -> str:
     if not name:
         return ""
 
-    name = name.strip()
+    name = name.lower().strip()
     ranks = [
         "п/п-к.",
-        "п-к.",
-        "ст. л-т",
         "п/п-к",
+        "п-к.",
         "п-к",
-        "ст.",
+        "к-н.",
+        "к-н",
+        "м-р.",
+        "м-р",
+        "ст. л-т",
+        "ст.л-т",
+        "л-т.",
         "л-т",
+        "ст.",
+        "ст",
         "пол.",
+        "пол",
+        "полиции",
+        "л-т",
         "полковник",
+        "подполковник",
         "майор",
         "капитан",
         "старший",
@@ -117,8 +129,15 @@ def shorten_teacher(name: str) -> str:
     for rank in ranks:
         name = name.replace(rank, "").strip()
     name = " ".join(name.split())
-    parts = name.split()
-    return parts[0] if parts else name
+    parts = []
+    for part in name.split():
+        cleaned = part.strip(".,;:()")
+        if not cleaned or len(cleaned) <= 1:
+            continue
+        if re.match(r"^[а-яё]\.[а-яё]\.?$", cleaned):
+            continue
+        parts.append(cleaned)
+    return parts[0].capitalize() if parts else ""
 
 
 def normalize_class_type(class_type_name: str) -> str:
